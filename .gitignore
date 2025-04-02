@@ -1,0 +1,9 @@
+.venv
+.DS_Store
+.vscode/
+Data
+Documentos
+Bibilografia.docx
+Models/output.png
+Models/results_1.csv
+Models/results_2.csv
