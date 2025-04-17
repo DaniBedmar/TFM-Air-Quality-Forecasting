@@ -1,6 +1,6 @@
 import polars as pl
 from utils.dictionaries import tramit_file_columns,tramit_file_index
-def tramit_file_reader(file_name, cols_to_keep = ['EMISIONES_CO2','FEC_MATRICULA','CLAVE_TRAMITE','FEC_TRAMITE']):
+def tramit_file_reader(file_name, cols_to_keep = tramit_file_columns):
     
     col_widths = tramit_file_index
     col_names = tramit_file_columns
@@ -33,6 +33,6 @@ def tramit_file_reader(file_name, cols_to_keep = ['EMISIONES_CO2','FEC_MATRICULA
 
     df = df.with_columns(exprs).select(cols_to_keep)
     df = df.with_columns(pl.col("FEC_MATRICULA","FEC_TRAMITE").str.to_date("%d%m%Y", strict=False))
-    df = df.with_columns(pl.col("EMISIONES_CO2","CLAVE_TRAMITE").str.to_integer(base = 10, strict = False))
-    df = df.rename({"CLAVE_TRAMITE": "apple"})
+    #df = df.with_columns(pl.col("EMISIONES_CO2","CLAVE_TRAMITE").str.to_integer(base = 10, strict = False))
+    #df = df.rename({"CLAVE_TRAMITE": "apple"})
     return df
