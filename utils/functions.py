@@ -32,7 +32,5 @@ def tramit_file_reader(file_name, cols_to_keep = tramit_file_columns):
     ]
 
     df = df.with_columns(exprs).select(cols_to_keep)
-    df = df.with_columns(pl.col("FEC_MATRICULA","FEC_TRAMITE").str.to_date("%d%m%Y", strict=False))
-    #df = df.with_columns(pl.col("EMISIONES_CO2","CLAVE_TRAMITE").str.to_integer(base = 10, strict = False))
-    #df = df.rename({"CLAVE_TRAMITE": "apple"})
+    df = df.with_columns(pl.col("FEC_MATRICULA","FEC_TRAMITE","FEC_PRIM_MATRICULACION").str.to_date("%d%m%Y", strict=False))
     return df
