@@ -1,5 +1,89 @@
+import os
+import zipfile
+import datetime
+import requests
 import polars as pl
+from io import BytesIO
+from bs4 import BeautifulSoup
+
 from utils.dictionaries import tramit_file_columns,tramit_file_index
+
+def download_mat():
+    print('Let\'s proceed to download all the matriculaciones')
+    url_mat = 'https://www.dgt.es/menusecundario/dgt-en-cifras/matraba-listados/matriculaciones-automoviles-mensual.html'
+
+    path = os.path.join('Data', 'DGT', 'mat')
+    os.makedirs(path, exist_ok=True)
+
+    response = requests.get(url_mat)
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    for li in soup.find_all('li', class_='list-group-item'):
+        a_tag = li.find('a')
+        if a_tag and a_tag['href'].endswith('.zip'):
+            file_url = a_tag['href']
+            if file_url.startswith('/'):
+                file_url = 'https://www.dgt.es' + file_url
+
+            file_name = file_url.split('/')[-1]
+            print(f'Downloading and extracting {file_name}...')
+
+            zip_response = requests.get(file_url)
+            zip_file = zipfile.ZipFile(BytesIO(zip_response.content))
+
+            zip_file.extractall(path)
+
+def download_bajas():
+    print('Let\'s proceed to download all the bajas')
+    url_mat = 'https://www.dgt.es/menusecundario/dgt-en-cifras/matraba-listados/bajas-automoviles-mensual.html'
+
+    path = os.path.join('Data', 'DGT', 'bajas')
+    os.makedirs(path, exist_ok=True)
+
+    response = requests.get(url_mat)
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    for li in soup.find_all('li', class_='list-group-item'):
+        a_tag = li.find('a')
+        if a_tag and a_tag['href'].endswith('.zip'):
+            file_url = a_tag['href']
+            if file_url.startswith('/'):
+                file_url = 'https://www.dgt.es' + file_url
+
+            file_name = file_url.split('/')[-1]
+            print(f'Downloading and extracting {file_name}...')
+
+            zip_response = requests.get(file_url)
+            zip_file = zipfile.ZipFile(BytesIO(zip_response.content))
+
+            zip_file.extractall(path)
+
+def download_fleet():
+    print('Let\'s proceed to download the exact vehicle fleet ')
+
+    url_fleet = 'https://www.dgt.es/menusecundario/dgt-en-cifras/dgt-en-cifras-resultados/dgt-en-cifras-detalle/Microdatos-de-parque-de-vehiculos-anual/'
+
+    path = os.path.join('Data', 'DGT', 'Exact_fleet')
+    os.makedirs(path, exist_ok=True)
+
+    response = requests.get(url_fleet)
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    descarga_links = soup.find_all('a', id='descarga')
+
+    if descarga_links:
+        for a_tag in descarga_links:
+            if 'href' in a_tag.attrs and a_tag['href'].strip().endswith('.zip'):
+                file_url = a_tag['href'].strip()
+
+                print(f'Downloading and extracting {file_url}...')
+
+                zip_response = requests.get(file_url)
+                zip_file = zipfile.ZipFile(BytesIO(zip_response.content))
+
+                zip_file.extractall(path)
+                break
+
 def tramit_file_reader(file_name, cols_to_keep = tramit_file_columns):
     
     col_widths = tramit_file_index
@@ -34,3 +118,288 @@ def tramit_file_reader(file_name, cols_to_keep = tramit_file_columns):
     df = df.with_columns(exprs).select(cols_to_keep)
     df = df.with_columns(pl.col("FEC_MATRICULA","FEC_TRAMITE","FEC_PRIM_MATRICULACION").str.to_date("%d%m%Y", strict=False))
     return df
+
+def dates_range(start, end,type):
+    dates = []
+    current = datetime.date(start.year, start.month, 1)
+    while current <= end:
+        if (current == datetime.date(2023, 12, 1)):
+            current = datetime.date(current.year + 1, 1, 1)
+            continue
+
+        if type == 'mat':
+            dates.append(f"export_mensual_mat_{current.year}{current.month:02d}.txt")
+
+        elif type == 'bajas':
+            dates.append(f"export_mensual_bajas_{current.year}{current.month:02d}.txt")
+
+        if current.month == 12:
+            current = datetime.date(current.year + 1, 1, 1)
+        else:
+            current = datetime.date(current.year, current.month + 1, 1)
+    return dates
+
+def simplify_euro_emissions(df):
+    df = df.with_columns([
+        pl.when(pl.col("FECHA_PRIM_MATR").is_null()).then(pl.col("FECHA_MATR"))
+        .otherwise(pl.col("FECHA_PRIM_MATR"))
+        .alias("FECHA_PRIM_MATR")])
+    
+    df = df.with_columns([
+        pl.when(pl.col("FECHA_PRIM_MATR") >= pl.lit(datetime.date(2015, 9, 1))).then(pl.lit("EURO_6"))
+        .when(pl.col("FECHA_PRIM_MATR") >= pl.lit(datetime.date(2011, 1, 1))).then(pl.lit("EURO_5"))
+        .when(pl.col("FECHA_PRIM_MATR") >= pl.lit(datetime.date(2006, 1, 1))).then(pl.lit("EURO_4"))
+        .when(pl.col("FECHA_PRIM_MATR") >= pl.lit(datetime.date(2001, 1, 1))).then(pl.lit("EURO_3"))
+        .when(pl.col("FECHA_PRIM_MATR") >= pl.lit(datetime.date(1997, 1, 1))).then(pl.lit("EURO_2"))
+        .when(pl.col("FECHA_PRIM_MATR") >= pl.lit(datetime.date(1992, 12, 31))).then(pl.lit("EURO_1"))
+        .when(pl.col("FECHA_PRIM_MATR") < pl.lit(datetime.date(1992, 12, 31))).then(pl.lit("Previous"))
+        .otherwise(pl.lit("Unkwown"))
+        .alias("Simplified_EURO")
+        ])
+
+    df = df.with_columns(
+        pl.when((pl.col("PROPULSION") == "ELEC") | (pl.col("PROPULSION") == "H"))
+        .then(pl.lit("EURO_CLEAN"))
+        .otherwise(pl.col("Simplified_EURO"))
+        .alias("Simplified_EURO")
+        )
+
+    return df
+
+#With debugging prints
+def get_cars(fecha,park,
+             mat_path = os.path.join("..","Data", "DGT",'matr'),
+             bajas_path = os.path.join("..","Data", "DGT",'bajas')):
+    '''
+    fecha : date in string with format %d%m%Y
+    ''' 
+    fecha_foto = datetime.date(2023,12,1)
+    fecha = datetime.datetime.strptime(fecha, "%d%m%Y").date()
+    common_cols_tramites = ['FEC_MATRICULA','FEC_PRIM_MATRICULACION','COD_PROPULSION_ITV']
+    common_cols_mapping = {
+        "FEC_MATRICULA": "FECHA_MATR",
+        "FEC_PRIM_MATRICULACION": "FECHA_PRIM_MATR",
+        "COD_PROPULSION_ITV": "PROPULSION"}
+
+    print(f'Fecha seleccionada: {fecha}, fecha de la foto: {fecha_foto}')
+    if fecha == fecha_foto:
+        #Todos los coches en parque_exacto
+        park_distribution = park['Simplified_EURO'].value_counts().sort('Simplified_EURO')
+        print('La fecha coincide con la fecha de la foto')
+        return park_distribution
+    
+    elif fecha > fecha_foto:
+        # Todos los coches en parque_exacto con t_mat <= fecha (en teoria todos)+
+        # todas las matr entre (parque_exacto, fecha) con t_mat > fecha_foto (realmente que datetime.date(2023,12,31) (en teoria todos) -
+        # todas las bajas entre (parque_exacto, fecha) con fecha_mat <= fecha
+        print('Estamos mirando una fecha posterior a la foto')
+        print('Este es el parque exacto:')
+        print(park)
+        park_distribution = park['Simplified_EURO'].value_counts().sort('Simplified_EURO')
+        print(park_distribution)
+        print('Vamos a tener en cuenta los siguiuentes ficheros de matriculaciones')
+        mat_files = dates_range(fecha_foto,fecha,'mat')
+        print(mat_files)
+        print('Vamos a tener en cuenta los siguiuentes ficheros de bajas')
+        bajas_files = dates_range(fecha_foto,fecha,'bajas')
+        print(bajas_files)
+        print('Miremos las matriculaciones')
+        for file in mat_files:
+            print(f'Miremos el fichero {file}')
+            file_path = os.path.join(mat_path,file)
+            file = tramit_file_reader(file_path).select(common_cols_tramites).rename(common_cols_mapping)
+            print('Este es el fichero:')
+            print(file)
+            file.filter(pl.col('FECHA_MATR') > datetime.date(2023,12,31))
+            print('Este es el fichero despues de filtrar las matriculas despues de la foto:')
+            file = file.with_columns([
+                pl.when(pl.col("FECHA_PRIM_MATR").is_null()).then(pl.col("FECHA_MATR"))
+                .otherwise(pl.col("FECHA_PRIM_MATR"))
+                .alias("FECHA_PRIM_MATR")
+                ])
+            file = simplify_euro_emissions(file)
+            print(file)
+            file = file['Simplified_EURO'].value_counts().sort('Simplified_EURO')
+            print(file)
+            print('Recordemos que el parque era:')
+            print(park_distribution)
+            park_distribution = (
+                pl.concat([park_distribution, file])
+                .group_by("Simplified_EURO")
+                .agg(pl.sum("count"))
+                .sort("Simplified_EURO"))
+            print('Despues de sumar:')
+            print(park_distribution)
+
+        print('Miremos las bajas')
+        for file in bajas_files:
+            park_distribution = park_distribution.with_columns(
+                pl.col("count").cast(pl.Int64)
+                )
+            print(f'Miremos el fichero {file}')
+            file_path = os.path.join(bajas_path,file)
+            file = tramit_file_reader(file_path).select(common_cols_tramites).rename(common_cols_mapping)
+            print('Este es el fichero:')
+            print(file)
+            file.filter(pl.col("FECHA_MATR") <= fecha)
+            file = file.with_columns([
+                pl.when(pl.col("FECHA_PRIM_MATR").is_null()).then(pl.col("FECHA_MATR"))
+                .otherwise(pl.col("FECHA_PRIM_MATR"))
+                .alias("FECHA_PRIM_MATR")
+                ])
+            file = simplify_euro_emissions(file)
+            print('Este es el fichero despues de filtrar:')
+            print(file)
+            file = file['Simplified_EURO'].value_counts().sort('Simplified_EURO')
+            print(file)
+            print('tenemos que restar asi que invertimos:')
+            file = file.with_columns((pl.col("count") * -1).alias("count"))
+            print(file)
+            print('Recordemos que parque + matriculaciones es:')
+            print(park_distribution)
+            park_distribution = (
+                pl.concat([park_distribution, file])
+                .group_by("Simplified_EURO")
+                .agg(pl.sum("count"))
+                .sort("Simplified_EURO"))   
+            print('Despues de restar:')        
+            print(park_distribution)
+        return park_distribution
+
+    elif  fecha < fecha_foto:
+        # Todos los coches en parque_exacto con fecha_mat <= fecha  +
+        # Todas las bajas entre fehca <= t_baja < fecha_foto con  t_mat <= fecha
+        print('Estamos mirando una fecha anterior a la foto')
+        print('Este es el parque en la foto exacta:')
+        print(park)
+        park = park.filter(pl.col("FECHA_MATR") <= fecha)
+        print('Y este es el parque cosniderando solo coches matriculados antes o en la fecha seleccionada:')
+        print(park)
+        park_distribution = park['Simplified_EURO'].value_counts().sort('Simplified_EURO')
+        print(park_distribution)
+        bajas_files = dates_range(fecha,fecha_foto,'bajas')
+        print('Consideramos que tendremos que mirar los siguientes archivos de bajas:')
+        print(bajas_files)
+        print('Miremos als bajas')
+        for file in bajas_files:
+            print(f'En el caso del fichero {file}:')
+            file_path = os.path.join(bajas_path,file)
+            file = tramit_file_reader(file_path).select(common_cols_tramites).rename(common_cols_mapping)
+            print('Estas son las bajas:')
+            print(file)
+            file.filter(pl.col("FECHA_MATR") <= fecha)
+            file = file.with_columns([
+                pl.when(pl.col("FECHA_PRIM_MATR").is_null()).then(pl.col("FECHA_MATR"))
+                .otherwise(pl.col("FECHA_PRIM_MATR"))
+                .alias("FECHA_PRIM_MATR")
+                ])
+            file = simplify_euro_emissions(file).drop('PROPULSION')
+            print('Y estas son las bajas despues de filtrar solo las de coches con matriculacion anterioir a la fecha:')
+            print(file)
+            file = file['Simplified_EURO'].value_counts().sort('Simplified_EURO')
+            print(file)
+            print('Recordemos que el parque era:')
+            print(park_distribution)
+            print('Despues de sumar:')
+            park_distribution = (
+                pl.concat([park_distribution, file])
+                .group_by("Simplified_EURO")
+                .agg(pl.sum("count"))
+                .sort("Simplified_EURO"))
+            print(park_distribution)
+
+        return park_distribution
+    
+#Without debugging prints
+def get_cars_(fecha,park,
+             mat_path = os.path.join("..","Data", "DGT",'matr'),
+             bajas_path = os.path.join("..","Data", "DGT",'bajas')):
+    '''
+    fecha : date in string with format %d%m%Y
+    ''' 
+    fecha_foto = datetime.date(2023,12,1)
+    fecha = datetime.datetime.strptime(fecha, "%d%m%Y").date()
+    common_cols_tramites = ['FEC_MATRICULA','FEC_PRIM_MATRICULACION','COD_PROPULSION_ITV']
+    common_cols_mapping = {
+        "FEC_MATRICULA": "FECHA_MATR",
+        "FEC_PRIM_MATRICULACION": "FECHA_PRIM_MATR",
+        "COD_PROPULSION_ITV": "PROPULSION"}
+
+    if fecha == fecha_foto:
+        #Todos los coches en parque_exacto
+        park_distribution = park['Simplified_EURO'].value_counts().sort('Simplified_EURO')
+        return park_distribution
+    
+    elif fecha > fecha_foto:
+        # Todos los coches en parque_exacto con t_mat <= fecha (en teoria todos)+
+        # todas las matr entre (parque_exacto, fecha) con t_mat > fecha_foto (realmente que datetime.date(2023,12,31) (en teoria todos) -
+        # todas las bajas entre (parque_exacto, fecha) con fecha_mat <= fecha
+        park_distribution = park['Simplified_EURO'].value_counts().sort('Simplified_EURO')
+        mat_files = dates_range(fecha_foto,fecha,'mat')
+        bajas_files = dates_range(fecha_foto,fecha,'bajas')
+        for file in mat_files:
+            file_path = os.path.join(mat_path,file)
+            file = tramit_file_reader(file_path).select(common_cols_tramites).rename(common_cols_mapping)
+            file.filter(pl.col('FECHA_MATR') > datetime.date(2023,12,31))
+            file = file.with_columns([
+                pl.when(pl.col("FECHA_PRIM_MATR").is_null()).then(pl.col("FECHA_MATR"))
+                .otherwise(pl.col("FECHA_PRIM_MATR"))
+                .alias("FECHA_PRIM_MATR")
+                ])
+            file = simplify_euro_emissions(file)
+            file = file['Simplified_EURO'].value_counts().sort('Simplified_EURO')
+            park_distribution = (
+                pl.concat([park_distribution, file])
+                .group_by("Simplified_EURO")
+                .agg(pl.sum("count"))
+                .sort("Simplified_EURO"))
+
+        for file in bajas_files:
+            park_distribution = park_distribution.with_columns(
+                pl.col("count").cast(pl.Int64)
+                )
+            file_path = os.path.join(bajas_path,file)
+            file = tramit_file_reader(file_path).select(common_cols_tramites).rename(common_cols_mapping)
+            file.filter(pl.col("FECHA_MATR") <= fecha)
+            file = file.with_columns([
+                pl.when(pl.col("FECHA_PRIM_MATR").is_null()).then(pl.col("FECHA_MATR"))
+                .otherwise(pl.col("FECHA_PRIM_MATR"))
+                .alias("FECHA_PRIM_MATR")
+                ])
+            file = simplify_euro_emissions(file)
+            file = file['Simplified_EURO'].value_counts().sort('Simplified_EURO')
+            file = file.with_columns((pl.col("count") * -1).alias("count"))
+            park_distribution = (
+                pl.concat([park_distribution, file])
+                .group_by("Simplified_EURO")
+                .agg(pl.sum("count"))
+                .sort("Simplified_EURO"))   
+        return park_distribution
+
+    elif  fecha < fecha_foto:
+        # Todos los coches en parque_exacto con fecha_mat <= fecha  +
+        # Todas las bajas entre fehca <= t_baja < fecha_foto con  t_mat <= fecha
+        print('Estamos mirando una fecha anterior a la foto')
+        park = park.filter(pl.col("FECHA_MATR") <= fecha)
+        park_distribution = park['Simplified_EURO'].value_counts().sort('Simplified_EURO')
+        bajas_files = dates_range(fecha,fecha_foto,'bajas')
+        mat_files = dates_range(fecha,fecha_foto,'mat')
+
+        for file in bajas_files:
+            file_path = os.path.join(bajas_path,file)
+            file = tramit_file_reader(file_path).select(common_cols_tramites).rename(common_cols_mapping)
+            file.filter(pl.col("FECHA_MATR") <= fecha)
+            file = file.with_columns([
+                pl.when(pl.col("FECHA_PRIM_MATR").is_null()).then(pl.col("FECHA_MATR"))
+                .otherwise(pl.col("FECHA_PRIM_MATR"))
+                .alias("FECHA_PRIM_MATR")
+                ])
+            file = simplify_euro_emissions(file).drop('PROPULSION')
+            file = file['Simplified_EURO'].value_counts().sort('Simplified_EURO')
+            park_distribution = (
+                pl.concat([park_distribution, file])
+                .group_by("Simplified_EURO")
+                .agg(pl.sum("count"))
+                .sort("Simplified_EURO"))
+
+        return park_distribution
