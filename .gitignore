@@ -6,13 +6,5 @@ Documentos
 Forecasting.egg-info
 Bibliografia.docx
 Models
-Notebooks/data_cleaning.ipynb
-Notebooks/output.png
-Notebooks/results_1.csv
-Notebooks/results2.csv
-Notebooks/emisions_euro_GridSearchCV.py
-Notebooks/emisions_euro_RandomSearch.py
-Notebooks/cars_compilers_copy.ipynb
-Notebooks/cars_compilers.ipynb
-Notebooks/raw_anterior_compiler.ipynb
-Notebooks/raw_test_anterior.ipynb
+Notebooks
+Figures

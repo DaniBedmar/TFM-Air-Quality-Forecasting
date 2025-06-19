@@ -1,9 +1,13 @@
 import os
-import datetime
 import polars as pl
+import datetime
+import fastexcel
+from calendar import monthrange
 
+from utils.functions import get_valid_stations,filter_pollutant,simplify_euro_emissions,tramit_file_reader
 from utils.dictionaries import types_fleet_post
-from utils.functions import simplify_euro_emissions,tramit_file_reader
+
+valid_stations_path = os.path.join('..','Data','Air_quallity','valid_stations.csv')
 clearn_park_path = os.path.join('..','Data','DGT','Exact_fleet','clean_park.csv')
 bajas_dir_path = os.path.join('..','Data','DGT','bajas')
 
@@ -12,40 +16,12 @@ common_cols_mapping = {"FEC_MATRICULA": "FECHA_MATR", "FEC_PRIM_MATRICULACION": 
                        "COD_PROPULSION_ITV": "PROPULSION", "COD_MUNICIPIO_INE_VEH": "MUNICIPIO"}
 necessary_cols = ['FECHA_PRIM_MATR','FECHA_MATR','PROPULSION','MUNICIPIO']
 
-cities = pl.DataFrame({
-    "MUNICIPIO": [
-        "08019",  # Barcelona
-        "46250",  # València
-        "48020",  # Bilbao
-        "28079",  # Madrid
-        "41091",  # Sevilla
-        "50297",  # Zaragoza
-        "29067",  # Málaga
-        "30030",  # Murcia
-        "07040",  # Palma de Mallorca
-        "35016",  # Las Palmas de G.C.
-        "03014",  # Alicante
-        "14021",  # Córdoba
-        "47186",  # Valladolid
-        "36057",  # Vigo
-        "33024",  # Gijón
-        "01059",  # Vitoria-Gasteiz
-        "03065",  # Elche
-        "18087",  # Granada
-        "08279",  # Terrassa
-        "08187",  # Sabadell
-        "33044",  # Oviedo
-        "31201",  # Pamplona
-        "04013",  # Almería
-    ],
-    "CITY": ["BCN","VLC","BILB","MAD","SEV","ZAR","MAL","MURC","MALL","PGC",
-        "ALIC","COR","VALL","VIG","GIJ","VIT","ELCH","GRAN","TERR","SAB",
-        "OVI","PAMP","ALM"]
-})
-
+valid_stations = pl.read_csv(valid_stations_path, separator='|')
 park = pl.scan_csv(clearn_park_path,separator='|', schema=types_fleet_post).select(necessary_cols)
-park = park.collect()
-park = park.join(cities, on='MUNICIPIO', how='inner').drop('MUNICIPIO')
+park = park.collect().rename({'MUNICIPIO': 'MUNICIPIO_COD'})
+cities = pl.read_csv(valid_stations_path, separator='|', schema_overrides={'MUNICIPIO_COD': pl.String})
+cities = cities.select(["MUNICIPIO_COD", "CITY"]).unique()
+park = park.join(cities,on="MUNICIPIO_COD",how="inner").drop('MUNICIPIO_COD')
 park = simplify_euro_emissions(park).drop('PROPULSION')
 park = park.with_columns(pl.lit(datetime.date(2023,12,1)).alias("FEC_TRAMITE"))
 
@@ -55,8 +31,8 @@ bajas_files = [
 ]
 
 first_file_path = os.path.join(bajas_dir_path,bajas_files[0])
-file_bajas = tramit_file_reader(first_file_path).select(common_cols_tramites).rename(common_cols_mapping)
-file_bajas = file_bajas.join(cities, on='MUNICIPIO', how='inner').drop('MUNICIPIO')
+file_bajas = tramit_file_reader(first_file_path).select(common_cols_tramites).rename(common_cols_mapping).rename({'MUNICIPIO': 'MUNICIPIO_COD'})
+file_bajas = file_bajas.join(cities, on='MUNICIPIO_COD', how='inner').drop('MUNICIPIO_COD')
 file_bajas = simplify_euro_emissions(file_bajas).drop('PROPULSION')
 dato = bajas_files[0][-10:-4]
 dato = datetime.date(int(dato[:4]),int(dato[-2:]),1)
@@ -65,8 +41,8 @@ file_bajas = file_bajas.with_columns(
 
 for i in range(1,len(bajas_files)):
     file_path = os.path.join(bajas_dir_path,bajas_files[i])
-    new_file = tramit_file_reader(file_path).select(common_cols_tramites).rename(common_cols_mapping)
-    new_file = new_file.join(cities, on='MUNICIPIO', how='inner').drop('MUNICIPIO')
+    new_file = tramit_file_reader(file_path).select(common_cols_tramites).rename(common_cols_mapping).rename({'MUNICIPIO': 'MUNICIPIO_COD'})
+    new_file = new_file.join(cities, on='MUNICIPIO_COD', how='inner').drop('MUNICIPIO_COD')
     new_file = simplify_euro_emissions(new_file).drop('PROPULSION')
     dato = bajas_files[i][-10:-4]
     dato = datetime.date(int(dato[:4]),int(dato[-2:]),1)
@@ -90,23 +66,12 @@ while date <= datetime.date(2023, 12, 1):
     else:
         date = datetime.date(date.year, date.month + 1, 1)
 
-necessary_cols = ['FECHA_PRIM_MATR', 'FECHA_MATR', 'CITY', 'Simplified_EURO', 'FEC_TRAMITE']
-schema_file = {
-    'FECHA_PRIM_MATR': pl.Date,
-    'FECHA_MATR': pl.Date,
-    'CITY': pl.String,
-    'Simplified_EURO': pl.String,
-    'FEC_TRAMITE': pl.Date
-}
-file_path = os.path.join('..', 'Data', 'DGT', 'Exact_fleet', 'park_w_deregisters.csv')
-file = pl.scan_csv(file_path, separator='|', schema=schema_file).collect()
-
-all_classes = sorted(file['Simplified_EURO'].unique().to_list())
-
 rows = []
 date_exact = datetime.date(2023, 12, 1)
+all_classes = sorted(file['Simplified_EURO'].unique().to_list())
 
 for date in dates:
+    print(date)
     for city in file['CITY'].unique().to_list():
         selected = file.filter(
             (pl.col('FECHA_MATR') < date) &

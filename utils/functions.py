@@ -2,20 +2,21 @@ import os
 import zipfile
 import datetime
 import requests
+import fastexcel
 import polars as pl
 from io import BytesIO
 from bs4 import BeautifulSoup
+from calendar import monthrange
 
 from utils.dictionaries import tramit_file_columns,tramit_file_index
 
-def download_mat():
-    print('Let\'s proceed to download all the matriculaciones')
-    url_mat = 'https://www.dgt.es/menusecundario/dgt-en-cifras/matraba-listados/matriculaciones-automoviles-mensual.html'
+def download_mat(path = os.path.join('..','Data', 'DGT', 'mat')):
+    print('Let\'s proceed to download all the registrations')
+    url = 'https://www.dgt.es/menusecundario/dgt-en-cifras/matraba-listados/matriculaciones-automoviles-mensual.html'
 
-    path = os.path.join('Data', 'DGT', 'mat')
     os.makedirs(path, exist_ok=True)
 
-    response = requests.get(url_mat)
+    response = requests.get(url)
     soup = BeautifulSoup(response.content, 'html.parser')
 
     for li in soup.find_all('li', class_='list-group-item'):
@@ -33,14 +34,13 @@ def download_mat():
 
             zip_file.extractall(path)
 
-def download_bajas():
-    print('Let\'s proceed to download all the bajas')
-    url_mat = 'https://www.dgt.es/menusecundario/dgt-en-cifras/matraba-listados/bajas-automoviles-mensual.html'
+def download_bajas(path = os.path.join('..','Data', 'DGT', 'bajas')):
+    print('Let\'s proceed to download all the de-registrations')
+    url = 'https://www.dgt.es/menusecundario/dgt-en-cifras/matraba-listados/bajas-automoviles-mensual.html'
 
-    path = os.path.join('Data', 'DGT', 'bajas')
     os.makedirs(path, exist_ok=True)
 
-    response = requests.get(url_mat)
+    response = requests.get(url)
     soup = BeautifulSoup(response.content, 'html.parser')
 
     for li in soup.find_all('li', class_='list-group-item'):
@@ -58,15 +58,14 @@ def download_bajas():
 
             zip_file.extractall(path)
 
-def download_fleet():
+def download_fleet(path = os.path.join('..','Data', 'DGT', 'Exact_fleet')):
     print('Let\'s proceed to download the exact vehicle fleet ')
 
-    url_fleet = 'https://www.dgt.es/menusecundario/dgt-en-cifras/dgt-en-cifras-resultados/dgt-en-cifras-detalle/Microdatos-de-parque-de-vehiculos-anual/'
+    url= 'https://www.dgt.es/menusecundario/dgt-en-cifras/dgt-en-cifras-resultados/dgt-en-cifras-detalle/Microdatos-de-parque-de-vehiculos-anual/'
 
-    path = os.path.join('Data', 'DGT', 'Exact_fleet')
     os.makedirs(path, exist_ok=True)
 
-    response = requests.get(url_fleet)
+    response = requests.get(url)
     soup = BeautifulSoup(response.content, 'html.parser')
 
     descarga_links = soup.find_all('a', id='descarga')
@@ -84,7 +83,7 @@ def download_fleet():
                 zip_file.extractall(path)
                 break
 
-def tramit_file_reader(file_name, cols_to_keep = tramit_file_columns):
+def tramit_file_reader(file_path, cols_to_keep = tramit_file_columns):
     
     col_widths = tramit_file_index
     col_names = tramit_file_columns
@@ -99,7 +98,7 @@ def tramit_file_reader(file_name, cols_to_keep = tramit_file_columns):
         offset += separation
 
     df = pl.read_csv(
-        file_name,
+        file_path,
         has_header=False,
         encoding='ISO-8859-1',
         truncate_ragged_lines=True,
@@ -166,7 +165,6 @@ def simplify_euro_emissions(df):
 
     return df
 
-#With debugging prints
 def get_cars(fecha,park,
              mat_path = os.path.join("..","Data", "DGT",'matr'),
              bajas_path = os.path.join("..","Data", "DGT",'bajas')):
@@ -310,7 +308,6 @@ def get_cars(fecha,park,
 
         return park_distribution
     
-#Without debugging prints
 def get_cars_(fecha,park,
              mat_path = os.path.join("..","Data", "DGT",'matr'),
              bajas_path = os.path.join("..","Data", "DGT",'bajas')):
@@ -403,3 +400,176 @@ def get_cars_(fecha,park,
                 .sort("Simplified_EURO"))
 
         return park_distribution
+    
+def get_valid_stations2(file_path,cities):
+    valid_stations = {}
+    sheet_names = fastexcel.read_excel(file_path).sheet_names
+
+    for sheet in sheet_names:
+        if 'staci' in sheet:
+            sheet_of_interest = sheet
+
+    data = pl.read_excel(file_path, sheet_name=sheet_of_interest).select(['PROVINCIA','MUNICIPIO','ESTACION','TIPO_ESTACION'])
+    data = data.filter(pl.col('TIPO_ESTACION') == 'TRAFICO')
+
+    for city in cities:
+        Stations = data.filter(
+            (pl.col('PROVINCIA') == cities[city][0]) & (pl.col('MUNICIPIO') == cities[city][1])
+            ).get_column('ESTACION').to_list()
+        
+        valid_stations[city] = Stations
+
+    return valid_stations
+
+def get_valid_stations(file_path):
+    sheet_names = fastexcel.read_excel(file_path).sheet_names
+    for sheet in sheet_names:
+        if 'staci' in sheet:
+            sheet_of_interest = sheet
+    year = file_path.split('/')[-1].split('.')[0][-4:]
+
+    meta = pl.read_excel(file_path, sheet_name=sheet_of_interest)
+    meta = meta.filter(pl.col('TIPO_ESTACION') =='TRAFICO')
+
+    stations = meta.with_columns([
+        pl.col("PROVINCIA").cast(pl.Int32),
+        pl.col("MUNICIPIO").cast(pl.Int32),
+        pl.col("PROVINCIA").cast(str).str.zfill(2).alias("prov_str"),
+        pl.col("MUNICIPIO").cast(str).str.zfill(3).alias("muni_str")
+    ])
+
+    stations = stations.with_columns([
+        (pl.col("prov_str") + pl.col("muni_str")).alias("MUNICIPIO_COD")
+    ])
+
+    stations = stations.group_by(["MUNICIPIO_COD", "PROVINCIA", "MUNICIPIO", "N_MUNICIPIO"]).agg([
+        pl.col("ESTACION").unique().alias("ESTACIONES")
+    ])
+
+    stations = stations.rename({"N_MUNICIPIO": "CITY"})
+
+    stations = stations.select([
+        "MUNICIPIO_COD", "PROVINCIA", "MUNICIPIO", "CITY", "ESTACIONES"
+    ])
+    stations = stations.with_columns([
+        pl.lit(year).alias('year')
+    ])
+    return stations
+
+def filter_pollutant(file_path, valid_stations, pollutant = 'NI', coverage_threshold = 0.3):
+    
+    if file_path[-3:] == 'csv':
+        data = pl.read_csv(file_path, separator=';').drop('PUNTO_MUESTREO')
+
+    elif file_path[-3:] == 'lsx':
+        data = pl.read_excel(file_path).drop('PUNTO_MUESTREO')
+
+    data = data.join(
+        valid_stations,
+        on=["PROVINCIA", "MUNICIPIO", "ESTACION"],
+        how="inner"
+    )
+
+    day_cols = [col for col in data.columns if col.startswith('D')]
+
+    valid_data = (data.group_by(["CITY", "ANNO", "MES"])
+                  .agg([pl.mean(col).alias(col) for col in day_cols])
+                  )
+    
+    measures = valid_data[day_cols].transpose()
+    measure = 'MONTHLY' + pollutant + '_concentration'
+    means = measures.mean().transpose().rename({"column_0": measure})
+    not_valid = measures.null_count().transpose().rename({"column_0": "not_valid_days"})
+    aux = pl.concat([means,not_valid], how='horizontal')
+
+    valid_data = valid_data.drop(day_cols)
+
+    valid_data = pl.concat([valid_data,aux], how='horizontal')
+    valid_data = valid_data.with_columns(
+        pl.map_batches(
+            [pl.col("ANNO"), pl.col("MES"), pl.col('CITY')],
+            lambda cols: pl.Series([monthrange(int(year), int(month))[1] for year, month in zip(cols[0], cols[1])]),
+            return_dtype=pl.Int32
+            ).alias("days_in_month")
+            )
+
+    valid_data = valid_data.with_columns(
+        pl.date(
+            year=pl.col("ANNO").cast(pl.Int32),
+            month=pl.col("MES").cast(pl.Int32),
+            day=pl.lit(1)
+            ).alias("date")
+            ).drop(['ANNO','MES'])
+
+    valid_data = valid_data.with_columns(
+        ((pl.col("days_in_month") - pl.col("not_valid_days")) / pl.col("days_in_month")).alias("coverage")
+        )
+
+    valid_data = valid_data.drop(['days_in_month','not_valid_days'])
+    valid_data = valid_data.filter(pl.col("coverage") >= coverage_threshold)
+
+    valid_data = valid_data.group_by(['date','CITY']).agg([
+        (pl.col(measure) * pl.col("coverage")).sum() / 
+        pl.col("coverage").sum().alias("city_mean_weighted")
+        ]).sort('date').sort('date')
+    
+    return valid_data
+
+def filter_pollutant2(file_path, valid_stations, pollutant = 'NI', coverage_threshold = 0.3):
+    
+    if file_path[-3:] == 'csv':
+        data = pl.read_csv(file_path, separator=';').drop('PUNTO_MUESTREO')
+
+    elif file_path[-3:] == 'lsx':
+        data = pl.read_excel(file_path).drop('PUNTO_MUESTREO')
+
+    data = data.join(
+        valid_stations,
+        on=["PROVINCIA", "MUNICIPIO", "ESTACION"],
+        how="inner"
+    )
+
+    day_cols = [col for col in data.columns if col.startswith('D')]
+
+    valid_data = (data.group_by(["CITY", "ANNO", "MES"])
+                  .agg([pl.mean(col).alias(col) for col in day_cols])
+                  )
+    
+    measures = valid_data[day_cols].transpose()
+    measure = 'MONTHLY' + pollutant + '_concentration'
+    means = measures.mean().transpose().rename({"column_0": measure})
+    not_valid = measures.null_count().transpose().rename({"column_0": "not_valid_days"})
+    aux = pl.concat([means,not_valid], how='horizontal')
+
+    valid_data = valid_data.drop(day_cols)
+
+    valid_data = pl.concat([valid_data,aux], how='horizontal')
+    valid_data = valid_data.with_columns(
+        pl.map_batches(
+            [pl.col("ANNO"), pl.col("MES"), pl.col('CITY')],
+            lambda cols: pl.Series([monthrange(int(year), int(month))[1] for year, month in zip(cols[0], cols[1])]),
+            return_dtype=pl.Int32
+            ).alias("days_in_month")
+            )
+
+    valid_data = valid_data.with_columns(
+        pl.date(
+            year=pl.col("ANNO").cast(pl.Int32),
+            month=pl.col("MES").cast(pl.Int32),
+            day=pl.lit(1)
+            ).alias("date")
+            ).drop(['ANNO','MES'])
+
+    valid_data = valid_data.with_columns(
+        ((pl.col("days_in_month") - pl.col("not_valid_days")) / pl.col("days_in_month")).alias("coverage")
+        )
+
+    valid_data = valid_data.drop(['days_in_month','not_valid_days'])
+    valid_data = valid_data.filter(pl.col("coverage") >= coverage_threshold)
+
+    valid_data = valid_data.group_by(['date','CITY']).agg([
+        (pl.col(measure) * pl.col("coverage")).sum() / 
+        pl.col("coverage").sum().alias("city_mean_weighted")
+        ]).sort('date').sort('date')
+    
+    return valid_data
