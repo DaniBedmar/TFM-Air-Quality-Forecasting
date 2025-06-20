@@ -22,34 +22,31 @@ valid_stations_path = os.path.join('..','Data','Air_quallity','valid_stations.cs
 valid_stations.write_csv(valid_stations_path,separator='|')
 
 for i,dir in enumerate(dirs_path):
+    print(f'Processing the year {dir}')
     files = sorted([f for f in os.listdir(dir) if os.path.isfile(os.path.join(dir,f))])
     meta_info_file = [f for f in files if f.startswith('M')][0]
-    files.remove('.DS_Store')
+    if '.DS_Store' in files:
+        files.remove('.DS_Store')
     files.remove(meta_info_file)
     year = dir[-4:]
     valid_stations_aux = valid_stations.filter(pl.col('year') == year)
 
     for j,file in enumerate(files):
+        print(f'Processing {file}')
         polutant = file.split('_')[0]
         file_path = os.path.join(dir,file)
         
         if j == 0:
-            data1 = filter_pollutant(file_path,valid_stations_aux,polutant,0.25)
+            data = filter_pollutant(file_path,valid_stations_aux,polutant,0.25)
 
-        elif j == 1:
-            data2 = filter_pollutant(file_path,valid_stations_aux,polutant,0.25)
-
-        elif j == 2:
-            data3 = filter_pollutant(file_path,valid_stations_aux,polutant,0.25)
+        else:
+            aux_data = filter_pollutant(file_path,valid_stations_aux,polutant,0.25)
+            data = data.join(aux_data, on = ['date','CITY'], how='left')
 
     if i == 0:
-        final_data1, final_data2, final_data3 = data1,data2,data3
+        final_data = data
     else:
-        final_data1, final_data2, final_data3 = pl.concat([final_data1,data1]),pl.concat([final_data2,data2]),pl.concat([final_data3,data3])
+        final_data =  pl.concat([final_data,data])
 
-final_data1_path = os.path.join('..','Data','Air_quallity','historical_air_quallity_data_NI.csv')
-final_data2_path = os.path.join('..','Data','Air_quallity','historical_air_quallity_data_PM10.csv')
-final_data3_path = os.path.join('..','Data','Air_quallity','historical_air_quallity_data_PM25.csv')
-final_data1.write_csv(final_data1_path, separator='|')
-final_data2.write_csv(final_data2_path, separator='|')
-final_data3.write_csv(final_data3_path, separator='|')
+final_data_path = os.path.join('..','Data','Air_quallity','historical_air_quallity_data.csv')
+final_data.write_csv(final_data_path, separator='|')

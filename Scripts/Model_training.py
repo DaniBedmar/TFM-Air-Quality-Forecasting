@@ -6,22 +6,20 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
 
-pollutant_cols = ["MONTHLYNi_concentration","MONTHLYPM10_concentration","MONTHLYPM2.5_concentration"]
-for i,pollutant in enumerate(['dataset_Ni.parquet','dataset_PM10.parquet','dataset_PM25.parquet']):
+dataset_path = os.path.join('..','Data','Final_Dataset','final_dataset.parquet')
+dataset = pl.read_parquet(dataset_path)
+pollutants_cols = [col for col in dataset.columns if col.startswith('MONTHLY')]
 
-    dataset_path = os.path.join('..','Data','Final_Dataset',pollutant)
-    dataset = pl.read_parquet(dataset_path).to_pandas()
-    dataset["CITY"] = dataset["CITY"].astype("category")
-    target_col = pollutant_cols[i]
-    #valid_cities = []
-    #for city in dataset["CITY"].unique():
-        #subset = dataset[dataset["CITY"] == city]
+for i,pollutant_col in enumerate(pollutants_cols):
+    pollutant = pollutant_col.split('_')[0][7:]
+    exclude = set(pollutants_cols)
+    cols_of_interest = [s for s in dataset.columns if s not in exclude]
+    cols_of_interest.append(pollutant_col)
 
-       # n_obs = len(subset)
-      #  if n_obs > 1:  # skip small sample cities
-     #       valid_cities.append(city)
-
-    #dataset = dataset[dataset["CITY"]].isin(valid_cities)   
+    dataset_aux = dataset.select(cols_of_interest)
+    dataset_aux = dataset_aux.filter(pl.col(pollutant_col).is_not_null())
+    target_col = pollutant_col
+ 
     feature_cols = [
         "EURO_1", "EURO_2", "EURO_3", "EURO_4", "EURO_5", "EURO_6", "EURO_CLEAN",
         "Previous", "year", "month","month_sin","month_cos","TotalFleet",
@@ -43,10 +41,10 @@ for i,pollutant in enumerate(['dataset_Ni.parquet','dataset_PM10.parquet','datas
         "EURO_1", "EURO_2", "EURO_3", "EURO_4", "EURO_5", "EURO_6", "EURO_CLEAN",
         "Previous","CITY_AREA"]#CITY
         
-
-    dataset = dataset.dropna(subset=feature_cols + [target_col])
-    X = dataset[feature_cols]
-    y = dataset[target_col]
+    dataset_aux = dataset_aux.to_pandas()
+    dataset_aux = dataset_aux.dropna(subset=feature_cols + [target_col])
+    X = dataset_aux[feature_cols]
+    y = dataset_aux[target_col]
 
     from sklearn.preprocessing import StandardScaler
     scaler = StandardScaler()
@@ -81,3 +79,4 @@ for i,pollutant in enumerate(['dataset_Ni.parquet','dataset_PM10.parquet','datas
     rmse_lgb = mean_squared_error(y_test, y_pred_lgb)
     realtive_rmse = rmse_lgb/y.mean()
     print(f"LightGBM RMSE for {pollutant}: {100*realtive_rmse:.2f}")
+    print(dataset_aux.shape)

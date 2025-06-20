@@ -14,11 +14,8 @@ cities = {
 }
 
 fleet_distribution = os.path.join('..', 'Data', 'DGT', 'Exact_fleet', 'monthly_park_distribution.csv')
-air_quallity_paths = [
-    os.path.join('..', 'Data','Air_quallity','historical_air_quallity_data_Ni.csv'),
-    os.path.join('..', 'Data','Air_quallity','historical_air_quallity_data_PM25.csv'),
-    os.path.join('..', 'Data','Air_quallity','historical_air_quallity_data_PM10.csv')
-    ]
+air_quallity_path = os.path.join('..', 'Data','Air_quallity','historical_air_quallity_data.csv')
+air_quallity_data = pl.read_csv(air_quallity_path, separator='|').cast({'date': pl.Date})
 
 path_to_surface = os.path.join('..','Data','SUPERFICIE','MUNICIPIOS.csv')
 df_surface = pl.read_csv(path_to_surface, separator=';')
@@ -42,14 +39,12 @@ fleet = fleet.filter(~
                      ((pl.col("date") >= covid_inferior) &
                       (pl.col("date") <= covid_superior))
                       )
+pollutants_cols = [col for col in air_quallity_data.columns if col.startswith('MONTHLY')]
 
-for air_quallity_path in air_quallity_paths:
-    pollutant = air_quallity_path.split('_')[-1][:-4]
-    output_name = 'dataset'+'_'+pollutant+'.parquet'
-    output_file_path = os.path.join('..','Data','Final_Dataset',output_name)
-
-    air_quallity = pl.read_csv(air_quallity_path, separator= '|').cast({'date': pl.Date})
-    dataset = fleet.join(air_quallity, on=['date','CITY']).sort('date')
+for i,pollutant_col in enumerate(pollutants_cols):
+    pollutant = pollutant_col.split('_')[0][7:]
+    aux_air_quallity = air_quallity_data.select(['date','CITY',pollutant_col])
+    dataset = fleet.join(aux_air_quallity, on=['date','CITY']).sort('date')
 
     dataset = dataset.with_columns(pl.col("date").dt.year().alias("year"))
 
@@ -90,7 +85,6 @@ for air_quallity_path in air_quallity_paths:
         (np.sin(2 * np.pi * pl.col("date").dt.month() / 12)).alias("month_sin"),
         (np.cos(2 * np.pi * pl.col("date").dt.month() / 12)).alias("month_cos")
     ])
-
 
     dataset = dataset.with_columns(
         (pl.col("EURO_1") + pl.col("EURO_2") + pl.col("EURO_3") +
@@ -133,11 +127,14 @@ for air_quallity_path in air_quallity_paths:
 
     dataset = dataset.sort(["CITY", "date"])
 
-    #for pollutant in ["MONTHLY[Ni]", "MONTHLY[PM10]", "MONTHLY[PM2.5]"]:
-    #    dataset = dataset.with_columns(
-    #        pl.col(pollutant).shift(1).over("CITY").alias(f"{pollutant}_lag1"),
-    #        pl.col(pollutant).shift(2).over("CITY").alias(f"{pollutant}_lag2"),
-    #        pl.col(pollutant).shift(3).over("CITY").alias(f"{pollutant}_lag3")
-    #    )
     dataset = dataset.drop_nulls()
-    dataset.write_parquet(output_file_path)
+
+    if i == 0:
+        data = dataset
+    else:
+        cols = dataset.columns
+        cols.remove(pollutant_col)
+        data = data.join(dataset, on = cols ,how='left')
+
+output_file_path = os.path.join('..','Data','Final_Dataset','final_dataset.parquet')
+data.write_parquet(output_file_path)
