@@ -1,10 +1,12 @@
 import os
 import polars as pl
 import pandas as pd
+import numpy as np
 import lightgbm as lgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 import matplotlib.pyplot as plt
+
 
 dataset_path = os.path.join('..','Data','Final_Dataset','final_dataset.parquet')
 dataset = pl.read_parquet(dataset_path)
@@ -25,22 +27,45 @@ for i,pollutant_col in enumerate(pollutants_cols):
         "Previous", "year", "month","month_sin","month_cos","TotalFleet",
         "POPULATION","CARS_PER_CAPITA", "EURO_1_PER_CAPITA", "EURO_2_PER_CAPITA",
         "EURO_3_PER_CAPITA","EURO_4_PER_CAPITA","EURO_5_PER_CAPITA","EURO_6_PER_CAPITA",
-        "EURO_CLEAN_PER_CAPITA","Previous_PER_CAPITA"]#."CITY"
+        "EURO_CLEAN_PER_CAPITA","Previous_PER_CAPITA"]
     feature_cols = [
         "EURO_1", "EURO_2", "EURO_3", "EURO_4", "EURO_5", "EURO_6", "EURO_CLEAN",
-        "Previous", "year","CITY_AREA", "month","month_sin","month_cos","TotalFleet",
+        "Previous", "year","CITY_AREA","TotalFleet",
         "CARS_PER_KM2", "EURO_1_PER_KM2", "EURO_2_PER_KM2","EURO_3_PER_KM2","EURO_4_PER_KM2",
         "EURO_5_PER_KM2","EURO_6_PER_KM2","EURO_CLEAN_PER_KM2","Previous_PER_KM2","POPULATION",
         "Population_density","CARS_PER_CAPITA", "EURO_1_PER_CAPITA", "EURO_2_PER_CAPITA",
         "EURO_3_PER_CAPITA","EURO_4_PER_CAPITA","EURO_5_PER_CAPITA","EURO_6_PER_CAPITA",
         "EURO_CLEAN_PER_CAPITA","Previous_PER_CAPITA","EURO_1_PROPORTION","EURO_2_PROPORTION",
         "EURO_3_PROPORTION","EURO_4_PROPORTION","EURO_5_PROPORTION","EURO_6_PROPORTION",
-        "EURO_CLEAN_PROPORTION","Previous_PROPORTION"]#CITY
+        "EURO_CLEAN_PROPORTION","Previous_PROPORTION"]
     
+    
+    # Basicas
     feature_cols = [
         "EURO_1", "EURO_2", "EURO_3", "EURO_4", "EURO_5", "EURO_6", "EURO_CLEAN",
-        "Previous","CITY_AREA"]#CITY
-        
+        "Previous","TotalFleet"]
+    
+    # Basicas + area y poblacion
+    feature_cols = [
+        "EURO_1", "EURO_2", "EURO_3", "EURO_4", "EURO_5", "EURO_6", "EURO_CLEAN",
+        "Previous","TotalFleet","CITY_AREA","POPULATION"]
+    
+    # Basicas + cohes/km2
+    feature_cols = [
+        "EURO_1", "EURO_2", "EURO_3", "EURO_4", "EURO_5", "EURO_6", "EURO_CLEAN",
+        "Previous","TotalFleet",
+        "CARS_PER_KM2", "EURO_1_PER_KM2", "EURO_2_PER_KM2","EURO_3_PER_KM2","EURO_4_PER_KM2",
+        "EURO_5_PER_KM2","EURO_6_PER_KM2","EURO_CLEAN_PER_KM2","Previous_PER_KM2"]
+    
+    # Basicas + coches/capita
+    feature_cols = [
+        "EURO_1", "EURO_2", "EURO_3", "EURO_4", "EURO_5", "EURO_6", "EURO_CLEAN",
+        "Previous","TotalFleet",
+        "CARS_PER_CAPITA", "EURO_1_PER_CAPITA", "EURO_2_PER_CAPITA",
+        "EURO_3_PER_CAPITA","EURO_4_PER_CAPITA","EURO_5_PER_CAPITA","EURO_6_PER_CAPITA",
+        "EURO_CLEAN_PER_CAPITA","Previous_PER_CAPITA"]
+
+    #Basica
     dataset_aux = dataset_aux.to_pandas()
     dataset_aux = dataset_aux.dropna(subset=feature_cols + [target_col])
     X = dataset_aux[feature_cols]
@@ -76,7 +101,7 @@ for i,pollutant_col in enumerate(pollutants_cols):
     )
 
     y_pred_lgb = lgb_model.predict(X_test)
-    rmse_lgb = mean_squared_error(y_test, y_pred_lgb)
+    rmse_lgb = np.sqrt(mean_squared_error(y_test, y_pred_lgb))
     realtive_rmse = rmse_lgb/y.mean()
     print(f"LightGBM RMSE for {pollutant}: {100*realtive_rmse:.2f}")
     print(dataset_aux.shape)

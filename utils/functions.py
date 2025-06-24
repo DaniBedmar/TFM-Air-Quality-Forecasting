@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from calendar import monthrange
 
 from utils.dictionaries import tramit_file_columns,tramit_file_index
-
+        
 def download_mat(path = os.path.join('..','Data', 'DGT', 'mat')):
     print('Let\'s proceed to download all the registrations')
     url = 'https://www.dgt.es/menusecundario/dgt-en-cifras/matraba-listados/matriculaciones-automoviles-mensual.html'
@@ -115,7 +115,7 @@ def tramit_file_reader(file_path, cols_to_keep = tramit_file_columns):
     ]
 
     df = df.with_columns(exprs).select(cols_to_keep)
-    df = df.with_columns(pl.col("FEC_MATRICULA","FEC_TRAMITE","FEC_PRIM_MATRICULACION").str.to_date("%d%m%Y", strict=False))
+    df = df.with_columns(pl.col("FEC_MATRICULA","DATE_TRAMIT","FEC_PRIM_MATRICULACION").str.to_date("%d%m%Y", strict=False))
     return df
 
 def dates_range(start, end,type):
@@ -155,13 +155,12 @@ def simplify_euro_emissions(df):
         .otherwise(pl.lit("Unkwown"))
         .alias("Simplified_EURO")
         ])
-
-    df = df.with_columns(
-        pl.when((pl.col("PROPULSION") == "ELEC") | (pl.col("PROPULSION") == "H"))
-        .then(pl.lit("EURO_CLEAN"))
-        .otherwise(pl.col("Simplified_EURO"))
-        .alias("Simplified_EURO")
-        )
+    
+    df = df.with_columns(pl.when((pl.col("SUBTIPO_DGT").is_in(remolques)) | (pl.col('CLASE_MATR') == "Remolque"))
+                         .then(pl.lit("EURO_CLEAN"))
+                         .otherwise(pl.col("Simplified_EURO"))
+                         .alias("Simplified_EURO"),
+                         pl.col('SUBTIPO_DGT').replace(inverse_sub_tipo_mapping).alias("SUBTIPO_DGT"))
 
     return df
 
@@ -456,120 +455,58 @@ def get_valid_stations(file_path):
     ])
     return stations
 
-def filter_pollutant(file_path, valid_stations, pollutant = 'NI', coverage_threshold = 0.3):
+def filter_pollutant(file_path,valid_stations,coverage_threshold = 0.3):
+    if file_path.lower().endswith('.csv'):
+        df = pl.read_csv(file_path, separator=';').drop('PUNTO_MUESTREO')
+    elif file_path.lower().endswith(('xls','xlsx')):
+        df = pl.read_excel(file_path).drop('PUNTO_MUESTREO')
+    else:
+        raise ValueError("Unsupported file type: must be .csv or .xls/.xlsx")
     
-    if file_path[-3:] == 'csv':
-        data = pl.read_csv(file_path, separator=';').drop('PUNTO_MUESTREO')
+    pollutant = file_path.split('/')[-1].split('_')[0]
 
-    elif file_path[-3:] == 'lsx':
-        data = pl.read_excel(file_path).drop('PUNTO_MUESTREO')
-
-    data = data.join(
-        valid_stations,
-        on=["PROVINCIA", "MUNICIPIO", "ESTACION"],
-        how="inner"
-    )
-
-    day_cols = [col for col in data.columns if col.startswith('D')]
-
-    valid_data = (data.group_by(["CITY", "ANNO", "MES"])
-                  .agg([pl.mean(col).alias(col) for col in day_cols])
-                  )
+    df = df.join(valid_stations, on=['PROVINCIA','MUNICIPIO','ESTACION'], how='inner')
     
-    measures = valid_data[day_cols].transpose()
-    measure = 'MONTHLY' + pollutant + '_concentration'
-    means = measures.mean().transpose().rename({"column_0": measure})
-    not_valid = measures.null_count().transpose().rename({"column_0": "not_valid_days"})
-    aux = pl.concat([means,not_valid], how='horizontal')
+    hours = [c for c in df.columns if c.startswith('H')]
+    df = df.with_columns(
+        pl.concat_list(hours).list.mean().alias('daily_avg')
+        ).drop(hours)
+    
+    if df.is_empty():  
+        return pl.DataFrame(schema=['date', 'CITY', f'city_mean_weighted'])
+    
+    station_month = df.pivot(
+        values='daily_avg',
+        index=['PROVINCIA','MUNICIPIO','ESTACION','CITY','ANNO','MES'],
+        columns='DIA',
+        aggregate_function='first'
+    ).rename(lambda c: f"D{int(c):02d}" if c.isdigit() else c)
 
-    valid_data = valid_data.drop(day_cols)
+    day_cols = [c for c in station_month.columns if c.startswith('D')]
+    valid = station_month.group_by(['CITY','ANNO','MES']).agg([pl.mean(c).alias(c) for c in day_cols])
 
-    valid_data = pl.concat([valid_data,aux], how='horizontal')
-    valid_data = valid_data.with_columns(
+    measures = valid[day_cols].transpose()
+    measure_col = f"MONTHLY{pollutant}_concentration"
+    means = measures.mean().transpose().rename({'column_0': measure_col})
+    missing = measures.null_count().transpose().rename({'column_0': 'not_valid_days'})
+    valid = pl.concat([valid.drop(day_cols), means, missing], how='horizontal')
+
+    valid = valid.with_columns(
         pl.map_batches(
-            [pl.col("ANNO"), pl.col("MES"), pl.col('CITY')],
-            lambda cols: pl.Series([monthrange(int(year), int(month))[1] for year, month in zip(cols[0], cols[1])]),
+            [pl.col('ANNO'),pl.col('MES')],
+            lambda cols: pl.Series([monthrange(int(y),int(m))[1] for y,m in zip(cols[0],cols[1])]),
             return_dtype=pl.Int32
-            ).alias("days_in_month")
-            )
-
-    valid_data = valid_data.with_columns(
+        ).alias('days_in_month'),
         pl.date(
-            year=pl.col("ANNO").cast(pl.Int32),
-            month=pl.col("MES").cast(pl.Int32),
+            year=pl.col('ANNO').cast(pl.Int32),
+            month=pl.col('MES').cast(pl.Int32),
             day=pl.lit(1)
-            ).alias("date")
-            ).drop(['ANNO','MES'])
+        ).alias('date')
+    ).with_columns(
+        ((pl.col('days_in_month')-pl.col('not_valid_days'))/pl.col('days_in_month')).alias('coverage')
+    ).drop(['ANNO','MES','days_in_month','not_valid_days'])
 
-    valid_data = valid_data.with_columns(
-        ((pl.col("days_in_month") - pl.col("not_valid_days")) / pl.col("days_in_month")).alias("coverage")
-        )
+    filtered = valid.filter(pl.col('coverage') >= coverage_threshold)
+    filtered = filtered.group_by(['date','CITY']).agg((pl.col(measure_col)*pl.col('coverage')).sum()/pl.col('coverage').sum()).sort('date')
 
-    valid_data = valid_data.drop(['days_in_month','not_valid_days'])
-    valid_data = valid_data.filter(pl.col("coverage") >= coverage_threshold)
-
-    valid_data = valid_data.group_by(['date','CITY']).agg([
-        (pl.col(measure) * pl.col("coverage")).sum() / 
-        pl.col("coverage").sum().alias("city_mean_weighted")
-        ]).sort('date').sort('date')
-    
-    return valid_data
-
-def filter_pollutant2(file_path, valid_stations, pollutant = 'NI', coverage_threshold = 0.3):
-    
-    if file_path[-3:] == 'csv':
-        data = pl.read_csv(file_path, separator=';').drop('PUNTO_MUESTREO')
-
-    elif file_path[-3:] == 'lsx':
-        data = pl.read_excel(file_path).drop('PUNTO_MUESTREO')
-
-    data = data.join(
-        valid_stations,
-        on=["PROVINCIA", "MUNICIPIO", "ESTACION"],
-        how="inner"
-    )
-
-    day_cols = [col for col in data.columns if col.startswith('D')]
-
-    valid_data = (data.group_by(["CITY", "ANNO", "MES"])
-                  .agg([pl.mean(col).alias(col) for col in day_cols])
-                  )
-    
-    measures = valid_data[day_cols].transpose()
-    measure = 'MONTHLY' + pollutant + '_concentration'
-    means = measures.mean().transpose().rename({"column_0": measure})
-    not_valid = measures.null_count().transpose().rename({"column_0": "not_valid_days"})
-    aux = pl.concat([means,not_valid], how='horizontal')
-
-    valid_data = valid_data.drop(day_cols)
-
-    valid_data = pl.concat([valid_data,aux], how='horizontal')
-    valid_data = valid_data.with_columns(
-        pl.map_batches(
-            [pl.col("ANNO"), pl.col("MES"), pl.col('CITY')],
-            lambda cols: pl.Series([monthrange(int(year), int(month))[1] for year, month in zip(cols[0], cols[1])]),
-            return_dtype=pl.Int32
-            ).alias("days_in_month")
-            )
-
-    valid_data = valid_data.with_columns(
-        pl.date(
-            year=pl.col("ANNO").cast(pl.Int32),
-            month=pl.col("MES").cast(pl.Int32),
-            day=pl.lit(1)
-            ).alias("date")
-            ).drop(['ANNO','MES'])
-
-    valid_data = valid_data.with_columns(
-        ((pl.col("days_in_month") - pl.col("not_valid_days")) / pl.col("days_in_month")).alias("coverage")
-        )
-
-    valid_data = valid_data.drop(['days_in_month','not_valid_days'])
-    valid_data = valid_data.filter(pl.col("coverage") >= coverage_threshold)
-
-    valid_data = valid_data.group_by(['date','CITY']).agg([
-        (pl.col(measure) * pl.col("coverage")).sum() / 
-        pl.col("coverage").sum().alias("city_mean_weighted")
-        ]).sort('date').sort('date')
-    
-    return valid_data
+    return filtered

@@ -23,7 +23,7 @@ cities = pl.read_csv(valid_stations_path, separator='|', schema_overrides={'MUNI
 cities = cities.select(["MUNICIPIO_COD", "CITY"]).unique()
 park = park.join(cities,on="MUNICIPIO_COD",how="inner").drop('MUNICIPIO_COD')
 park = simplify_euro_emissions(park).drop('PROPULSION')
-park = park.with_columns(pl.lit(datetime.date(2023,12,1)).alias("FEC_TRAMITE"))
+park = park.with_columns(pl.lit(datetime.date(2023,12,1)).alias("DATE_TRAMIT"))
 
 bajas_files = [
     f for f in os.listdir(bajas_dir_path)
@@ -37,7 +37,7 @@ file_bajas = simplify_euro_emissions(file_bajas).drop('PROPULSION')
 dato = bajas_files[0][-10:-4]
 dato = datetime.date(int(dato[:4]),int(dato[-2:]),1)
 file_bajas = file_bajas.with_columns(
-    pl.lit(dato).alias("FEC_TRAMITE"))
+    pl.lit(dato).alias("DATE_TRAMIT"))
 
 for i in range(1,len(bajas_files)):
     file_path = os.path.join(bajas_dir_path,bajas_files[i])
@@ -47,12 +47,12 @@ for i in range(1,len(bajas_files)):
     dato = bajas_files[i][-10:-4]
     dato = datetime.date(int(dato[:4]),int(dato[-2:]),1)
     new_file = new_file.with_columns(
-        pl.lit(dato).alias("FEC_TRAMITE")
+        pl.lit(dato).alias("DATE_TRAMIT")
         )
     
     file_bajas = pl.concat([file_bajas,new_file])
 
-file_bajas = file_bajas.select(['FECHA_PRIM_MATR', 'FECHA_MATR', 'CITY', 'Simplified_EURO','FEC_TRAMITE'])
+file_bajas = file_bajas.select(['FECHA_PRIM_MATR', 'FECHA_MATR', 'CITY', 'Simplified_EURO','DATE_TRAMIT'])
 file = pl.concat([park,file_bajas])
 file_path = os.path.join('..','Data','DGT','Exact_fleet','park_w_deregisters.csv')
 file.write_csv(file_path,separator='|')
@@ -76,8 +76,8 @@ for date in dates:
         selected = file.filter(
             (pl.col('FECHA_MATR') < date) &
             (pl.col('CITY') == city) &
-            ((pl.col('FEC_TRAMITE') == date_exact) |
-             ((pl.col('FEC_TRAMITE') < date_exact) & (pl.col('FEC_TRAMITE') >= date))
+            ((pl.col('DATE_TRAMIT') == date_exact) |
+             ((pl.col('DATE_TRAMIT') < date_exact) & (pl.col('DATE_TRAMIT') >= date))
             ))
         
         vc = selected['Simplified_EURO'].value_counts()

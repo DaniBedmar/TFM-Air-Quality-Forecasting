@@ -37,10 +37,10 @@ for i,dir in enumerate(dirs_path):
         file_path = os.path.join(dir,file)
         
         if j == 0:
-            data = filter_pollutant(file_path,valid_stations_aux,polutant,0.25)
+            data = filter_pollutant(file_path,valid_stations_aux,0.25)
 
         else:
-            aux_data = filter_pollutant(file_path,valid_stations_aux,polutant,0.25)
+            aux_data = filter_pollutant(file_path,valid_stations_aux,0.25)
             data = data.join(aux_data, on = ['date','CITY'], how='left')
 
     if i == 0:
