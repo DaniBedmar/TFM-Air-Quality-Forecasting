@@ -33,8 +33,8 @@ area_df = df_cities.join(
 ).rename({'SUPERFICIE':'CITY_AREA'}).select(["CITY", "CITY_AREA"])
 
 fleet = pl.read_csv(fleet_distribution, separator='|').cast({'date': pl.Date})
-covid_inferior = datetime.date(2023,1,1)
-covid_superior = datetime.date(2023,12,1)
+covid_inferior = datetime.date(2020,3,1)
+covid_superior = datetime.date(2020,9,1)
 fleet = fleet.filter(~
                      ((pl.col("date") >= covid_inferior) &
                       (pl.col("date") <= covid_superior))

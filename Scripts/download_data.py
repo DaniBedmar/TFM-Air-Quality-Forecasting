@@ -1,5 +1,5 @@
 import sys
-from utils.functions import download_mat, download_bajas, download_fleet
+from utils.functions import download_bajas, download_fleet
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
@@ -8,11 +8,7 @@ if __name__ == "__main__":
 
     argument = sys.argv[1]
 
-    if argument == "mat":
-        print('Let\'s proceed with the download of just the registrations')
-        download_mat()
-
-    elif argument == "bajas":
+    if argument == "bajas":
         print('Let\'s proceed with the download of just the de-registrations')
         download_bajas()
 
@@ -22,9 +18,8 @@ if __name__ == "__main__":
 
     elif argument == "all":
         print('Let\'s proceed with the download of all the files')
-        download_mat()
         download_bajas()
         download_fleet()
 
     else:
-        print('Invalid argument. Use \'mat\', \'bajas\', \'exact_file\' or \'all\'')
+        print('Invalid argument. Use \'bajas\', \'exact_file\' or \'all\'')
