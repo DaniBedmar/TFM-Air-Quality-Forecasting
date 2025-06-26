@@ -115,7 +115,7 @@ def tramit_file_reader(file_path, cols_to_keep = tramit_file_columns):
     ]
 
     df = df.with_columns(exprs).select(cols_to_keep)
-    df = df.with_columns(pl.col("FEC_MATRICULA","DATE_TRAMIT","FEC_PRIM_MATRICULACION").str.to_date("%d%m%Y", strict=False))
+    df = df.with_columns(pl.col("FEC_MATRICULA","FEC_PRIM_MATRICULACION").str.to_date("%d%m%Y", strict=False))
     return df
 
 def dates_range(start, end,type):
@@ -156,11 +156,12 @@ def simplify_euro_emissions(df):
         .alias("Simplified_EURO")
         ])
     
-    df = df.with_columns(pl.when((pl.col("SUBTIPO_DGT").is_in(remolques)) | (pl.col('CLASE_MATR') == "Remolque"))
-                         .then(pl.lit("EURO_CLEAN"))
-                         .otherwise(pl.col("Simplified_EURO"))
-                         .alias("Simplified_EURO"),
-                         pl.col('SUBTIPO_DGT').replace(inverse_sub_tipo_mapping).alias("SUBTIPO_DGT"))
+    df = df.with_columns(
+        pl.when((pl.col("PROPULSION") == "ELEC") | (pl.col("PROPULSION") == "H"))
+        .then(pl.lit("EURO_CLEAN"))
+        .otherwise(pl.col("Simplified_EURO"))
+        .alias("Simplified_EURO")
+        )
 
     return df
 
